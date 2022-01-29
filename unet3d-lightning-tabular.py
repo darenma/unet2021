@@ -10,12 +10,13 @@ import torch.nn.functional as F
 
 #seed_everything(11)
 
-from torchmetrics.functional import r2score as _r2score
+from torchmetrics import R2Score as _r2score
+#from ignite.contrib.metrics.regression import R2Score
 
 
 #seed_everything(11)
 
-
+device = 'cuda'
 
 PARAMS = {
     'min_epochs': 30,
@@ -96,7 +97,7 @@ class LitURNet3d(pl.LightningModule):
                                                     adas_out, y_adas, filename, False)
         adas_out_combined = adas_out_combined.type_as(X)
 
-        linear_pred = adas_out_combined.view(-1)     
+        linear_pred = adas_out_combined.view(-1).cuda()     
 
         # segmentation metrics
         seg_loss = F.cross_entropy(seg_out, y_img)
@@ -107,7 +108,12 @@ class LitURNet3d(pl.LightningModule):
         # regression metrics
         adas_loss = F.smooth_l1_loss(linear_pred, y_adas.squeeze(1))
         adas_mse_loss = F.mse_loss(linear_pred, y_adas.squeeze(1))
-        adas_r2 = _r2score(linear_pred, y_adas.squeeze(1))
+        r2_score = _r2score()
+        r2_score.to(device)
+        y_adas_squeeze = y_adas.squeeze(1)
+        adas_r2 = r2_score(linear_pred,y_adas_squeeze)
+
+        #adas_r2 = _r2score(linear_pred, y_adas.squeeze(1))
        
     
         opt = self.optimizers()
@@ -188,7 +194,7 @@ class LitURNet3d(pl.LightningModule):
                                             filename, True, self.final_w1_epoch, self.final_w2_epoch)
         
         adas_out_combined = adas_out_combined.type_as(X)
-        linear_pred = adas_out_combined.view(-1)  
+        linear_pred = adas_out_combined.view(-1).cuda()  
 
         seg_loss = F.cross_entropy(seg_out, y_img)
         _, preds = torch.max(seg_out.data, 1)
@@ -196,7 +202,13 @@ class LitURNet3d(pl.LightningModule):
 
         vadas_loss = F.smooth_l1_loss(linear_pred, y_adas.squeeze(1))
         vadas_mse_loss = F.mse_loss(linear_pred, y_adas.squeeze(1))
-        vadas_r2 = _r2score(linear_pred, y_adas.squeeze(1))
+        r2_score = _r2score()
+        #device = 'cuda'
+        r2_score.to(device)
+        #print(linear_pred.get_device())
+        y_adas_squeeze = y_adas.squeeze(1)
+        #print(y_adas_squeeze.get_device())
+        vadas_r2 = r2_score(linear_pred,y_adas_squeeze)
 
         # combined loss
         vloss = seg_loss + vadas_loss  
@@ -289,7 +301,7 @@ class LitURNet3d(pl.LightningModule):
         files_in_df = X['filenames'].tolist()
 
         hgradboost_preds = []
-        hgb_pipe = load('models/tabular_models/hgb_model.joblib') 
+        hgb_pipe = load('/home/cpabalan/brainlabs_cp/final_brainlabs/models/tabular_models/hgb_model.joblib') 
 
         for idx, f in enumerate(filenames):
             if f in files_in_df:
@@ -377,20 +389,20 @@ class expansion_block3d(pl.LightningModule):
 
 
 # Neptune Logger
-neptune_logger = NeptuneLogger( 
-    tags=['only_unet', 'huber_loss', 'large_unet', 'linear'],
-    api_key="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0"+\
-    "cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI3ZTAwNTc5NC0yYjI4LTQzNjgtOWRiZS1lYTAxZTU5NDhjNjQifQ==",
-    params=PARAMS,
-    project_name = 'cpabalan/cog-regression',
-    close_after_fit=True
-)
+#neptune_logger = NeptuneLogger( 
+    #tags=['only_unet', 'huber_loss', 'large_unet', 'linear'],
+    #api_key="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0"+\
+    #"cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI3ZTAwNTc5NC0yYjI4LTQzNjgtOWRiZS1lYTAxZTU5NDhjNjQifQ==",
+    #params=PARAMS,
+    #project_name = 'cpabalan/cog-regression',
+    #close_after_fit=True
+#)
 
 
 # Initalizing callbacks
 checkpoint_callback = ModelCheckpoint(
     monitor='val_score_loss_epoch',
-    dirpath='/home/cpabalan/brainlabs_cp/brainlabs_prep/models/lightning_models/with_tabular/',
+    dirpath='/home/cguo18/brain/unet2021/models/lightning_models/with_tabular/',
     filename = '{val_r2_epoch:.4f}_{val_score_mse_loss_epoch:.2f}_{epoch:02d}',
     save_top_k=3,
     mode = 'min'
@@ -400,7 +412,7 @@ checkpoint_callback = ModelCheckpoint(
 
 trainer = Trainer(
  #   fast_dev_run = True,
-    gpus=3, 
+    gpus=[0,1,2], 
     auto_select_gpus=True,
     #auto_lr_find=True,
     accelerator='ddp',
@@ -410,13 +422,13 @@ trainer = Trainer(
     callbacks=[checkpoint_callback],
     min_epochs= PARAMS['min_epochs'],
     max_epochs = PARAMS['max_epochs'],
-    logger=neptune_logger
+    #logger=neptune_logger
 )
 
 
 
 #model = LitURNet3d(1,4)
-PATH_TO_MODEL = '/home/cpabalan/brainlabs_cp/brainlabs_prep/models/lightning_models/unet/val_r2_epoch=0.6519_val_score_mse_loss_epoch=34.68_epoch=33.ckpt'
+PATH_TO_MODEL = '/home/cpabalan/brainlabs_cp/final_brainlabs/models/lightning_models/unet/archive/val_r2_epoch=0.6519_val_score_mse_loss_epoch=34.68_epoch=33.ckpt'
 #model = model.load_from_checkpoint(PATH_TO_MODEL)
 model = LitURNet3d.load_from_checkpoint(PATH_TO_MODEL)
 

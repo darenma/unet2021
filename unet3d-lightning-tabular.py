@@ -1,7 +1,7 @@
 from imports import *
 from CogDataset3d import *
 
-
+import h5py
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -11,6 +11,7 @@ import torch.nn.functional as F
 #seed_everything(11)
 
 from torchmetrics import R2Score as _r2score
+from torchmetrics.functional import dice_score 
 #from ignite.contrib.metrics.regression import R2Score
 
 
@@ -90,7 +91,10 @@ class LitURNet3d(pl.LightningModule):
         X = X.view(dim1,1,dim2,dim3,dim4)
         y_img = y_img.squeeze(1).long()
         y_adas = y_adas.unsqueeze(1).float()
-        adas_out, seg_out = self(X)   
+        adas_out, seg_out = self(X)
+        hf = h5py.File(f'/home/cguo18/brain/unet2021/feature_map/extracted{batch_idx}.hdf5','w')
+        hf['seg_out'] = seg_out.cpu().detach().numpy()
+        hf.close()
 
         
         adas_out_combined, weight1, weight2 = self.get_combined_preds(self.df, 
@@ -103,7 +107,8 @@ class LitURNet3d(pl.LightningModule):
         seg_loss = F.cross_entropy(seg_out, y_img)
         _, preds = torch.max(seg_out.data, 1)
         y_seg_acc = preds.eq(y_img).sum().item()/total_pixels
-
+        
+        dice_sc = dice_score(seg_out,y_img)
 
         # regression metrics
         adas_loss = F.smooth_l1_loss(linear_pred, y_adas.squeeze(1))
